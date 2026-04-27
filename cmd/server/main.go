@@ -67,7 +67,10 @@ func main() {
 	// 6. Configuración Maestra de CORS
 	// Aplicamos CORS a TODO el enrutador (mux)
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins: []string{
+			"https://my-reminder-git-main-kerberos001s-projects.vercel.app",
+			"http://localhost:5173",
+		},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PUT", "DELETE"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
