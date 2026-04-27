@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/99designs/gqlgen/graphql/handler/transport" // Importante para Sockets
+	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/99designs/gqlgen/graphql/playground"
-	"github.com/gorilla/websocket" // Necesario para la configuración del Upgrader
+	"github.com/gorilla/websocket"
 	"github.com/jmontenegro/my-reminders-backend/graph"
 	"github.com/jmontenegro/my-reminders-backend/pkg/database"
 	"github.com/jmontenegro/my-reminders-backend/pkg/utils"
@@ -31,30 +31,41 @@ func main() {
 		port = defaultPort
 	}
 
-	// --- 2. INICIALIZAR EL BROKER PARA REAL-TIME ---
+	// 2. Inicializar Broker
 	broker := graph.NewBroker()
 
-	// 3. Configurar el servidor GraphQL
+	// 3. Configurar servidor GraphQL
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
 		Resolvers: &graph.Resolver{
 			DB:     database.DB,
-			Broker: broker, // 👈 Ahora el Resolver ya tiene su Broker
+			Broker: broker,
 		},
 	}))
 
-	// --- 4. CONFIGURACIÓN CRÍTICA PARA WEBSOCKETS (CORS) ---
-	// Sin esto, el navegador bloqueará la conexión del socket desde React
+	// 4. Configuración de WebSockets
 	srv.AddTransport(transport.Websocket{
 		KeepAlivePingInterval: 10 * time.Second,
 		Upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				// Permite el origen de tu Vite/React
+				// Permite conexiones desde cualquier origen para el túnel WS
 				return true
 			},
 		},
 	})
 
-	// 5. Configuración de CORS para HTTP
+	// 5. Crear un Mux (enrutador) personalizado en lugar de usar el de por defecto
+	mux := http.NewServeMux()
+
+	// Ruta para el Playground (Pública)
+	mux.Handle("/", playground.Handler("GraphQL Playground", "/query"))
+
+	// Ruta para la API (Protegida por Middleware de Auth)
+	// El middleware de auth envuelve directamente al servidor GraphQL
+	protectedHandler := utils.Middleware(database.DB)(srv)
+	mux.Handle("/query", protectedHandler)
+
+	// 6. Configuración Maestra de CORS
+	// Aplicamos CORS a TODO el enrutador (mux)
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{
 			"https://my-reminder-git-main-kerberos001s-projects.vercel.app",
@@ -63,18 +74,14 @@ func main() {
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PUT", "DELETE"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
-		Debug:            false,
+		Debug:            true, // Mantén esto en true para ver los logs en Render mientras pruebas
 	})
 
-	// 6. Middlewares
-	protectedHandler := utils.Middleware(database.DB)(srv)
-	finalHandler := c.Handler(protectedHandler)
-
-	// 7. Rutas
-	http.Handle("/", playground.Handler("GraphQL Playground", "/query"))
-	http.Handle("/query", finalHandler)
+	// El handler final es el CORS envolviendo al Mux
+	finalHandler := c.Handler(mux)
 
 	// 8. Iniciar el Servidor
-	fmt.Printf("🚀 Servidor Real-Time (WebSockets + Auth) listo en http://localhost:%s/\n", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	// Usamos 0.0.0.0 para asegurar que sea visible en entornos Docker/Render
+	fmt.Printf("🚀 Servidor Bento desplegado y escuchando en puerto %s\n", port)
+	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, finalHandler))
 }
