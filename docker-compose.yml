@@ -1,28 +1,30 @@
-# my-reminders-backend/docker-compose.yml
 version: '3.8'
 
 services:
-  # Definimos el servicio de la Base de Datos
   db:
-    # Usamos la imagen oficial de Postgres, versión 15 sobre Alpine Linux (ultra ligera)
-    image: postgres:15-alpine
-    container_name: postgres_container
-    restart: always # Se reinicia si Docker se apaga
-
-    # CONFIGURACIÓN ESENCIAL (Variables de Entorno)
+    image: postgres:16-alpine
+    container_name: reminders-db
+    restart: always
     environment:
-      - POSTGRES_USER=myuser         # Usuario administrador local
-      - POSTGRES_PASSWORD=mypassword # Contraseña (¡cámbiala si quieres!)
-      - POSTGRES_DB=reminders_db    # Nombre de la base de datos para la App
-
-    # MAPEADO DE PUERTOS
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: reminders_db
     ports:
-      - "5432:5432" # Mapea puerto local (izq) al puerto del contenedor (der)
-
-    # PERSISTENCIA DE DATOS (Vital)
+      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data # Guarda los datos en un volumen nombrado
+      - postgres_data:/var/lib/postgresql/data
 
-# Definimos el volumen nombrado para que los datos no se borren al apagar el contenedor
+  app:
+    build: .
+    container_name: reminders-backend
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://myuser:mypassword@db:5432/reminders_db?sslmode=disable
+      - JWT_SECRET=tu_secreto_super_seguro_bento
+    depends_on:
+      - db
+
 volumes:
-  pgdata:
+  postgres_data:
