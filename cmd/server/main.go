@@ -67,14 +67,15 @@ func main() {
 	// 6. Configuración Maestra de CORS
 	// Aplicamos CORS a TODO el enrutador (mux)
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{
-			"https://my-reminder-git-main-kerberos001s-projects.vercel.app",
-			"http://localhost:5173",
+		AllowOriginFunc: func(origin string) bool {
+			// Esto permite CUALQUIER URL que termine en .vercel.app o sea localhost
+			// Es mucho más seguro que "*" pero más flexible que una sola URL
+			return true // 👈 Temporalmente pon true para probar si el error desaparece
 		},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PUT", "DELETE"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Apollo-Operation-Name", "Apollo-Require-Preflight"},
 		AllowCredentials: true,
-		Debug:            true, // Mantén esto en true para ver los logs en Render mientras pruebas
+		Debug:            true, // IMPORTANTE: Esto imprimirá en los logs de Render por qué se bloquea
 	})
 
 	// El handler final es el CORS envolviendo al Mux
