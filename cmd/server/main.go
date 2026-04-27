@@ -17,72 +17,63 @@ import (
 	"github.com/rs/cors"
 )
 
-const defaultPort = "8080"
-
 func main() {
-	// 1. Inicializar la DB
 	if err := database.InitDB(); err != nil {
-		log.Fatalf("No se pudo inicializar la DB: %v", err)
+		log.Fatalf("Error DB: %v", err)
 	}
 	defer database.CloseDB()
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = defaultPort
+		port = "8080"
 	}
 
-	// 2. Inicializar Broker
 	broker := graph.NewBroker()
-
-	// 3. Configurar servidor GraphQL
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
-		Resolvers: &graph.Resolver{
-			DB:     database.DB,
-			Broker: broker,
-		},
+		Resolvers: &graph.Resolver{DB: database.DB, Broker: broker},
 	}))
 
-	// 4. Configuración de WebSockets
 	srv.AddTransport(transport.Websocket{
 		KeepAlivePingInterval: 10 * time.Second,
 		Upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				// Permite conexiones desde cualquier origen para el túnel WS
-				return true
-			},
+			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	})
 
-	// 5. Crear un Mux (enrutador) personalizado en lugar de usar el de por defecto
+	// --- ENRUTADOR ---
 	mux := http.NewServeMux()
 
-	// Ruta para el Playground (Pública)
+	// Aplicamos el middleware de Auth SOLO a la ruta /query
+	protectedHandler := utils.Middleware(database.DB)(srv)
+
+	mux.Handle("/query", protectedHandler)
 	mux.Handle("/", playground.Handler("GraphQL Playground", "/query"))
 
-	// Ruta para la API (Protegida por Middleware de Auth)
-	// El middleware de auth envuelve directamente al servidor GraphQL
-	protectedHandler := utils.Middleware(database.DB)(srv)
-	mux.Handle("/query", protectedHandler)
-
-	// 6. Configuración Maestra de CORS
-	// Aplicamos CORS a TODO el enrutador (mux)
+	// --- CONFIGURACIÓN DE CORS (MUY EXPLÍCITA) ---
 	c := cors.New(cors.Options{
-		AllowOriginFunc: func(origin string) bool {
-			// Esto permite CUALQUIER URL que termine en .vercel.app o sea localhost
-			// Es mucho más seguro que "*" pero más flexible que una sola URL
-			return true // 👈 Temporalmente pon true para probar si el error desaparece
+		AllowedOrigins: []string{
+			"https://my-reminder-git-main-kerberos001s-projects.vercel.app",
+			"http://localhost:5173",
 		},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS", "PUT", "DELETE"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Apollo-Operation-Name", "Apollo-Require-Preflight"},
+		AllowedMethods: []string{"GET", "POST", "OPTIONS", "PUT", "DELETE"},
+		// Añadimos cabeceras específicas que Apollo suele enviar
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "apollo-require-preflight", "x-apollo-operation-name"},
 		AllowCredentials: true,
-		Debug:            true, // IMPORTANTE: Esto imprimirá en los logs de Render por qué se bloquea
+		Debug:            true, // IMPORTANTE: Verás en los logs de Render por qué acepta o rechaza
 	})
 
-	// El handler final es el CORS envolviendo al Mux
-	finalHandler := c.Handler(mux)
+	// ENVOLVEMOS TODO EL MUX CON CORS
+	handlerWithCors := c.Handler(mux)
 
-	// 8. Iniciar el Servidor
-	// Usamos 0.0.0.0 para asegurar que sea visible en entornos Docker/Render
-	fmt.Printf("🚀 Servidor Bento desplegado y escuchando en puerto %s\n", port)
-	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, finalHandler))
+	fmt.Printf("🚀 Bento Backend en puerto %s\n", port)
+
+	// FORZAMOS EL USO DE handlerWithCors EN LUGAR DE nil
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      handlerWithCors,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	log.Fatal(server.ListenAndServe())
 }
