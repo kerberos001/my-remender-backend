@@ -1,0 +1,116 @@
+# graph/schema.graphqls
+enum GroupStatus {
+    PENDING
+    APPROVED
+    ADMIN
+}
+# Tipo Usuario Bento Style
+type User {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    biometricsEnabled: Boolean!
+    createdAt: String!
+    # Estos campos son cruciales para el flujo de grupos
+    status: String
+    groupName: String
+}
+
+# Payload de Autenticación Híbrida (Novedoso)
+type AuthPayload {
+    token: String!
+    user: User!
+    # El Frontend React usará esto para el flujo UX Bento
+    status: GroupStatus!
+    groupName: String # NULL si es individual
+}
+
+# Input para Registro
+input RegisterInput {
+    firstName: String!
+    lastName: String!
+    email: String!
+    password: String!
+    # Para el flujo híbrido
+    joinGroupName: String
+    createGroupName: String
+}
+
+# Input para Login
+input LoginInput {
+    email: String!
+    password: String!
+}
+
+type Query {
+    me: User
+}
+
+type Mutation {
+    # Registro con estado híbrido
+    register(input: RegisterInput!): AuthPayload!
+    # Login y verificación de estado (para Dashboard o Esperando Aprobación)
+    login(input: LoginInput!): AuthPayload!
+}
+
+type Reminder {
+    id: ID!
+    title: String!
+    description: String
+    dueDate: String!
+    isCompleted: Boolean!
+    priority: Int! # 1: Bajo, 2: Medio, 3: Alto
+}
+type Notification {
+    id: ID!
+    type: String!
+    title: String!
+    message: String!
+    isRead: Boolean!
+    createdAt: String!
+    requesterId: String
+    groupId: String
+}
+
+
+
+extend type Query {
+    notifications: [Notification!]!
+}
+
+extend type Mutation {
+    markAllNotificationsAsRead: Boolean! # <--- Para el botón del panel
+}
+
+# Actualizamos Query para listar
+extend type Query {
+    myReminders: [Reminder!]!
+}
+
+type Subscription {
+    notificationAdded: Notification!
+}
+
+extend type Mutation {
+    # Recibe el ID del usuario que solicita y si se aprueba o no
+    authorizeMember(requesterId: ID!, groupId: ID!, approve: Boolean!): Boolean!
+}
+
+# Actualizamos Mutation para el CRUD
+extend type Mutation {
+    createReminder(
+        title: String!,
+        description: String,
+        priority: Int!,
+        completed: Boolean, # <--- MIRA SI AQUÍ DICE 'completed' o 'isCompleted'
+        dueDate: String!
+    ): Reminder!
+    toggleReminder(id: ID!): Reminder!
+    deleteReminder(id: ID!): Boolean!
+    # Solo accesible por el ADMIN del grupo
+    approveMember(userId: ID!): Boolean!
+    # Para que el ADMIN vea quién está esperando
+    pendingMembers: [User!]!
+    updateReminder(id: ID!, title: String!, description: String, priority: Int!, completed: Boolean, dueDate: String!): Reminder!
+}
