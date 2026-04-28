@@ -47,7 +47,7 @@ func main() {
 	protectedHandler := utils.Middleware(database.DB)(srv)
 
 	mux.Handle("/query", protectedHandler)
-	mux.Handle("/", playground.Handler("GraphQL Playground prueba", "/query"))
+	mux.Handle("/", playground.Handler("GraphQL Versión 2.0", "/query"))
 
 	// --- CONFIGURACIÓN DE CORS (MUY EXPLÍCITA) ---
 	c := cors.New(cors.Options{
@@ -65,7 +65,7 @@ func main() {
 	// ENVOLVEMOS TODO EL MUX CON CORS
 	handlerWithCors := c.Handler(mux)
 
-	fmt.Printf("🚀 Bento Backend en puerto %s\n", port)
+	fmt.Printf("🚀 Bento Backend Versión 2.0 en puerto %s\n", port)
 
 	// FORZAMOS EL USO DE handlerWithCors EN LUGAR DE nil
 	server := &http.Server{
