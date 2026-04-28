@@ -17,25 +17,6 @@ import (
 	"github.com/rs/cors"
 )
 
-package main
-
-import (
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"time"
-
-	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/99designs/gqlgen/graphql/handler/transport"
-	"github.com/99designs/gqlgen/graphql/playground"
-	"github.com/gorilla/websocket"
-	"github.com/jmontenegro/my-reminders-backend/graph"
-	"github.com/jmontenegro/my-reminders-backend/pkg/database"
-	"github.com/jmontenegro/my-reminders-backend/pkg/utils"
-	"github.com/rs/cors"
-)
-
 func main() {
 	if err := database.InitDB(); err != nil {
 		log.Fatalf("Error DB: %v", err)
@@ -84,7 +65,7 @@ func main() {
 	// ENVOLVEMOS TODO EL MUX CON CORS
 	handlerWithCors := c.Handler(mux)
 
-	fmt1.Printf("🚀 Bento Backend Versión 2.0 en puerto %s\n", port)
+	fmt.Printf("🚀 Bento Backend Versión 2.0 en puerto %s\n", port)
 
 	// FORZAMOS EL USO DE handlerWithCors EN LUGAR DE nil
 	server := &http.Server{
