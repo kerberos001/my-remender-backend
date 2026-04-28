@@ -47,7 +47,7 @@ func main() {
 	protectedHandler := utils.Middleware(database.DB)(srv)
 
 	mux.Handle("/query", protectedHandler)
-	mux.Handle("/", playground.Handler("GraphQL Playground", "/query"))
+	mux.Handle("/", playground.Handler("GraphQL Playground prueba", "/query"))
 
 	// --- CONFIGURACIÓN DE CORS (MUY EXPLÍCITA) ---
 	c := cors.New(cors.Options{
