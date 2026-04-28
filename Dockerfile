@@ -16,8 +16,9 @@ RUN go mod download
 # Copiamos el resto del código
 COPY . .
 
-# Compilamos el binario (CGO_ENABLED=0 para que sea estático y ligero)
-RUN CGO_ENABLED=0 GOOS=linux go build -o main .
+# Antes: RUN CGO_ENABLED=0 GOOS=linux go build -o main .
+# Ahora: Apuntamos a la carpeta donde realmente está el main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/server
 
 # --- ETAPA 2: Producción (Final) ---
 FROM alpine:latest
