@@ -20,7 +20,7 @@ import (
 // Register es el resolver para la mutación 'register'
 // Implementa el Flujo Híbrido PENDING/APPROVED (vía 'image_31.png')
 func (r *mutationResolver) Register(ctx context.Context, input model.RegisterInput) (*model.AuthPayload, error) {
-	// 1. Verificar si el email ya existe
+	// 1. Verificar si el email ya existe (Igual que antes)
 	var exists bool
 	err := r.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email=$1)", input.Email).Scan(&exists)
 	if err != nil {
@@ -30,61 +30,59 @@ func (r *mutationResolver) Register(ctx context.Context, input model.RegisterInp
 		return nil, fmt.Errorf("el email ya está registrado")
 	}
 
-	// 2. Hashear la contraseña (Security Pro: Bcrypt)
 	hashedPassword, err := utils.HashPassword(input.Password)
 	if err != nil {
 		return nil, fmt.Errorf("error hasheando contraseña: %w", err)
 	}
 
-	// 3. Iniciar Transacción (Transactional Bento Style)
+	// 3. Iniciar Transacción
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error iniciando transacción: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback si algo falla
+	defer tx.Rollback(ctx)
 
-	// 4. Crear el Usuario en Postgres (db.go via image_28.png)
-	var user models.User // Modelo de DB
+	// 4. Crear el Usuario
+	var user models.User
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (first_name, last_name, email, password_hash)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, first_name, last_name, email, biometrics_enabled, created_at
-	`, input.FirstName, input.LastName, input.Email, hashedPassword).Scan(
+       INSERT INTO users (first_name, last_name, email, password_hash)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, first_name, last_name, email, biometrics_enabled, created_at
+    `, input.FirstName, input.LastName, input.Email, hashedPassword).Scan(
 		&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.BiometricsEnabled, &user.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("error creando usuario: %w", err)
 	}
 
-	// 5. Lógica del Flujo Híbrido de Aprobación
-	status := "APPROVED" // Por defecto (si es solo individual)
+	status := "APPROVED"
 	groupName := ""
 
 	if input.CreateGroupName != nil {
-		// --- FLUJO: Crear Nuevo Grupo (Soporte ADMIN) ---
+		// --- FLUJO: Crear Nuevo Grupo ---
 		var groupID string
 		err = tx.QueryRow(ctx, `
-			INSERT INTO groups (name, admin_id) VALUES ($1, $2) RETURNING id
-		`, *input.CreateGroupName, user.ID).Scan(&groupID)
+          INSERT INTO groups (name, admin_id) VALUES ($1, $2) RETURNING id
+       `, *input.CreateGroupName, user.ID).Scan(&groupID)
 		if err != nil {
 			return nil, fmt.Errorf("error creando grupo: %w", err)
 		}
 
-		// Añadir al usuario como miembro ADMIN y APPROVED
 		_, err = tx.Exec(ctx, `
-			INSERT INTO group_members (user_id, group_id, status) VALUES ($1, $2, 'ADMIN')
-		`, user.ID, groupID)
+          INSERT INTO group_members (user_id, group_id, status) VALUES ($1, $2, 'ADMIN')
+       `, user.ID, groupID)
 		if err != nil {
 			return nil, fmt.Errorf("error añadiendo miembro admin: %w", err)
 		}
-		status = "APPROVED" // Ya está aprobado
+		status = "APPROVED"
 		groupName = *input.CreateGroupName
 
 	} else if input.JoinGroupName != nil {
-		// --- FLUJO: Unirse a Grupo Existente (ESTADO: PENDING) ---
-		// Esta validación te dio el error "no existe". ¡Funciona verificado técnicamente!
-		var groupID string
-		err = r.DB.QueryRow(ctx, "SELECT id FROM groups WHERE name=$1", *input.JoinGroupName).Scan(&groupID)
+		// --- FLUJO: Unirse a Grupo Existente (CORREGIDO) ---
+		var groupID, adminID string
+
+		// 1. Buscamos el ID del grupo Y el ID del administrador
+		err = tx.QueryRow(ctx, "SELECT id, admin_id FROM groups WHERE name=$1", *input.JoinGroupName).Scan(&groupID, &adminID)
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return nil, fmt.Errorf("el grupo '%s' no existe", *input.JoinGroupName)
@@ -92,43 +90,52 @@ func (r *mutationResolver) Register(ctx context.Context, input model.RegisterInp
 			return nil, fmt.Errorf("error buscando grupo: %w", err)
 		}
 
-		// Añadir al usuario como miembro PENDING (vía image_31.png)
+		// 2. Añadir al usuario como miembro PENDING
 		_, err = tx.Exec(ctx, `
-			INSERT INTO group_members (user_id, group_id, status) VALUES ($1, $2, 'PENDING')
-		`, user.ID, groupID)
+          INSERT INTO group_members (user_id, group_id, status) VALUES ($1, $2, 'PENDING')
+       `, user.ID, groupID)
 		if err != nil {
-			return nil, fmt.Errorf("error uniéndose al grupo (pendiente): %w", err)
+			return nil, fmt.Errorf("error uniéndose al grupo: %w", err)
 		}
-		status = "PENDING" // ¡Este es el estado clave que verificado técnicamente!
+
+		// 3. NUEVO: Crear la notificación para el Administrador
+		notificationMsg := fmt.Sprintf("%s %s solicita unirse a tu grupo '%s'", user.FirstName, user.LastName, *input.JoinGroupName)
+		_, err = tx.Exec(ctx, `
+          INSERT INTO notifications (user_id, requester_id, group_id, type, title, message)
+          VALUES ($1, $2, $3, 'GROUP_REQUEST', 'Nueva Solicitud de Acceso', $4)
+       `, adminID, user.ID, groupID, notificationMsg)
+
+		if err != nil {
+			return nil, fmt.Errorf("error creando notificación: %w", err)
+		}
+
+		status = "PENDING"
 		groupName = *input.JoinGroupName
 	}
 
-	// 6. Commit de la Transacción
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("error commiteando transacción: %w", err)
 	}
 
-	// 7. Generar Token JWT REAL (Simulado por ahora para no atascarte)
-	// Más adelante lo cambiaremos por utils.GenerateToken real
+	// (Opcional) Si quieres tiempo real, aquí podrías disparar el r.Broker.Publish
+	// para que el admin vea la burbuja de notificación sin refrescar.
+
 	token, err := utils.GenerateToken(&user, status, groupName)
 	if err != nil {
 		return nil, fmt.Errorf("error generando token: %w", err)
 	}
 
-	// 8. Devolver Payload Real (Bento Flow)
-	log.Printf("Usuario %s registrado con éxito. Estado: %s", user.Email, status)
 	return &model.AuthPayload{
 		Token: token,
-		User: &model.User{ // Mapeo manual a GraphQL model.User
+		User: &model.User{
 			ID:                user.ID,
 			FirstName:         user.FirstName,
 			LastName:          user.LastName,
 			Email:             user.Email,
 			BiometricsEnabled: user.BiometricsEnabled,
 		},
-		Status: model.GroupStatus(status), // El frontend React usará esto para el flujo UX Bento
-		// Fix Novedoso: groupName es *string en model.AuthPayload
-		GroupName: utils.StrPtr(groupName), // Usamos StrPtr helper
+		Status:    model.GroupStatus(status),
+		GroupName: utils.StrPtr(groupName),
 	}, nil
 }
 
@@ -268,7 +275,7 @@ func (r *mutationResolver) CreateReminder(ctx context.Context, title string, des
 	var groupID string
 	err := r.DB.QueryRow(ctx, `
         SELECT group_id FROM group_members 
-        WHERE user_id = $1 AND (status = 'APPROVED' OR status = 'ADMIN') 
+        WHERE user_id = $1  
         LIMIT 1
     `, user.ID).Scan(&groupID)
 
